@@ -2,10 +2,7 @@ use color_eyre::{eyre::ContextCompat, Result};
 use pollster::FutureExt;
 use winit::dpi::PhysicalSize;
 
-use crate::{
-    camera::{self, CameraBinding},
-    utils::FrameCounter,
-};
+use crate::camera::{self, CameraBinding};
 mod global_ubo;
 
 use global_ubo::GlobalUniformBinding;
@@ -180,9 +177,10 @@ impl State {
         })
     }
 
-    pub fn update(&mut self, frame_counter: &FrameCounter) {
-        self.global_uniform.frame = frame_counter.frame_count;
-        self.global_uniform.time = frame_counter.accum_time;
+    pub fn update(&mut self, accumulated_time: f64, frame_number: u32) {
+        self.global_uniform.frame = frame_number;
+        dbg!(accumulated_time);
+        self.global_uniform.time = accumulated_time as _;
         self.global_uniform.resolution = [
             self.surface_config.width as _,
             self.surface_config.height as _,

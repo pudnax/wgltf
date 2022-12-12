@@ -6,9 +6,7 @@ use gltf::accessor::{
 };
 use wgpu::{PrimitiveTopology, VertexFormat::*};
 
-mod frame_counter;
 mod input;
-pub use frame_counter::FrameCounter;
 pub use input::Input;
 
 pub trait NonZeroSized: Sized {

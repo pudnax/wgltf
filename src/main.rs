@@ -1,5 +1,7 @@
+use std::time::Instant;
+
 use color_eyre::Result;
-use wgltf::utils::{FrameCounter, Input};
+use wgltf::utils::Input;
 use wgpu::SurfaceError;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -7,6 +9,10 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
+
+const UPDATES_PER_SECOND: i32 = 60;
+const MAX_FRAME_TIME: f64 = 0.1;
+const FIXED_TIME_STEP: f64 = 1. / UPDATES_PER_SECOND as f64;
 
 fn main() -> Result<()> {
     let event_loop = EventLoop::new();
@@ -18,13 +24,17 @@ fn main() -> Result<()> {
     let mut input = Input::new();
     let zoom_speed = 0.002;
     let rotate_speed = 0.0025;
-    let mut frame_counter = FrameCounter::new();
+
+    let mut frame_number = 0;
+    let mut previous_instant = Instant::now();
+    let mut _blending_factor = 0.;
+    let mut accumulated_time = 0.;
+    let mut timeline = 0.;
 
     event_loop.run(move |event, _, control_flow| {
         control_flow.set_poll();
         match event {
             Event::MainEventsCleared => {
-                state.update(&frame_counter);
                 window.request_redraw();
             }
             Event::WindowEvent {
@@ -41,7 +51,22 @@ fn main() -> Result<()> {
                 }
             }
             Event::RedrawRequested(_) => {
-                frame_counter.record();
+                let current_instant = Instant::now();
+                let mut elapsed = current_instant
+                    .duration_since(previous_instant)
+                    .as_secs_f64();
+                if elapsed > MAX_FRAME_TIME {
+                    elapsed = MAX_FRAME_TIME;
+                }
+                accumulated_time += elapsed;
+                timeline += elapsed;
+                while accumulated_time >= FIXED_TIME_STEP {
+                    state.update(timeline, frame_number);
+
+                    accumulated_time -= FIXED_TIME_STEP;
+                    frame_number += 1;
+                }
+                _blending_factor = accumulated_time / FIXED_TIME_STEP;
                 if let Err(err) = state.render() {
                     eprintln!("get_current_texture error: {:?}", err);
                     match err {
@@ -57,6 +82,8 @@ fn main() -> Result<()> {
                         _ => (),
                     }
                 };
+
+                previous_instant = current_instant;
             }
             Event::DeviceEvent { event, .. } => match event {
                 DeviceEvent::MouseWheel { delta, .. } => {

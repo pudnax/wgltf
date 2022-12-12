@@ -31,5 +31,5 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4(0.5, 0.4, 0.4 + fract(un.time) * 0.25, 1.);
+    return vec4(0.5, 0.4 + smoothstep(0., 0.5, in.vert_pos.y), 0.4 + fract(un.time) * 0.25, 1.);
 }
