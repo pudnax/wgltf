@@ -67,7 +67,7 @@ fn main() -> Result<()> {
                     frame_number += 1;
                 }
                 _blending_factor = accumulated_time / FIXED_TIME_STEP;
-                if let Err(err) = state.render() {
+                if let Err(err) = state.render_mesh() {
                     eprintln!("get_current_texture error: {:?}", err);
                     match err {
                         SurfaceError::Lost | SurfaceError::Outdated => {
