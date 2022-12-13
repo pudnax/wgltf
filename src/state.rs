@@ -43,17 +43,18 @@ impl TryFrom<gltf::Semantic> for ShaderLocation {
     }
 }
 
+#[derive(Debug)]
 pub enum DrawMode {
-    // u32
-    Normal(usize),
+    Normal(u32),
     Indexed {
         buffer: wgpu::Buffer,
-        offset: usize,
+        offset: u64,
         ty: wgpu::IndexFormat,
-        draw_count: usize,
+        draw_count: u32,
     },
 }
 
+#[derive(Debug)]
 pub struct GpuPrimitive {
     pub pipeline: wgpu::RenderPipeline,
     pub buffers: Vec<wgpu::Buffer>,
@@ -113,7 +114,7 @@ pub struct State {
 
     scene: GltfScene,
     node_data: HashMap<usize, wgpu::BindGroup>,
-    primitive_data: HashMap<usize, GpuPrimitive>,
+    primitive_data: HashMap<(usize, usize), GpuPrimitive>,
 }
 
 impl State {
@@ -207,10 +208,10 @@ impl State {
         let depth_texture = create_depth_framebuffer(&device, &surface_config, depth_format);
 
         let camera = camera::Camera::new(
-            1.,
-            0.5,
-            1.,
-            (0., 0., 0.).into(),
+            5.17,
+            -0.34,
+            2.6,
+            (0., 5., 0.).into(),
             width as f32 / height as f32,
         );
         let camera_binding = camera::CameraBinding::new(&device);
@@ -276,7 +277,7 @@ impl State {
                 let mut vertex_attributes = vec![];
                 let mut primitive_buffers = vec![];
                 let mut draw_count = 0;
-                for (i, (semantic, accessor)) in primitive.attributes().enumerate() {
+                for (semantic, accessor) in primitive.attributes() {
                     let Some(buffer_view) = accessor.view() else { continue };
 
                     let Some(shader_location) = ShaderLocation::new(semantic) else { continue; };
@@ -297,7 +298,7 @@ impl State {
                     let buffer = scene.data_of_accessor(&accessor)?;
                     primitive_buffers.push(device.create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("Vertex Buffer {i}")),
+                            label: Some(&format!("Vertex Buffer {:?}", mesh.name())),
                             contents: buffer,
                             usage: wgpu::BufferUsages::VERTEX,
                         },
@@ -348,7 +349,7 @@ impl State {
                 });
 
                 let draw_mode = match primitive.indices() {
-                    None => DrawMode::Normal(draw_count),
+                    None => DrawMode::Normal(draw_count as _),
                     Some(idx) => {
                         let buffer = scene.data_of_accessor(&idx)?;
                         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -358,9 +359,9 @@ impl State {
                         });
                         DrawMode::Indexed {
                             buffer,
-                            offset: idx.offset(),
+                            offset: idx.offset() as _,
                             ty: component_type_to_index_format(idx.data_type()),
-                            draw_count: idx.count(),
+                            draw_count: idx.count() as _,
                         }
                     }
                 };
@@ -373,7 +374,7 @@ impl State {
                 };
 
                 // Push primitive
-                primitive_data.insert(primitive.index(), gpu_primitive);
+                primitive_data.insert((mesh.index(), primitive.index()), gpu_primitive);
             }
         }
 
@@ -530,9 +531,10 @@ impl State {
         for (&node, gpu_node) in &self.node_data {
             rpass.set_bind_group(2, &gpu_node, &[]);
 
-            let mesh = self.scene.document.nodes().nth(node);
-            for primitive in mesh.unwrap().mesh().unwrap().primitives() {
-                let gpu_primitive = &self.primitive_data[&primitive.index()];
+            let node = self.scene.document.nodes().nth(node).unwrap();
+            let mesh = node.mesh().unwrap();
+            for primitive in mesh.primitives() {
+                let gpu_primitive = &self.primitive_data[&(mesh.index(), primitive.index())];
 
                 rpass.set_pipeline(&gpu_primitive.pipeline);
                 for (i, buffer) in gpu_primitive.buffers.iter().enumerate() {
@@ -540,15 +542,15 @@ impl State {
                 }
 
                 match &gpu_primitive.draw_mode {
-                    DrawMode::Normal(draw_count) => rpass.draw(0..*draw_count as _, 0..1),
+                    DrawMode::Normal(draw_count) => rpass.draw(0..*draw_count, 0..1),
                     DrawMode::Indexed {
                         buffer,
                         offset,
                         ty,
                         draw_count,
                     } => {
-                        rpass.set_index_buffer(buffer.slice(*offset as u64..), *ty);
-                        rpass.draw_indexed(0..*draw_count as _, 0, 0..1)
+                        rpass.set_index_buffer(buffer.slice(*offset..), *ty);
+                        rpass.draw_indexed(0..*draw_count, 0, 0..1)
                     }
                 }
             }

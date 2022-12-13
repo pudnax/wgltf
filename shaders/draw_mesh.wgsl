@@ -6,7 +6,8 @@ struct Uniform {
 
 struct Camera {
 	view_pos: vec3<f32>,
-	proj_view: mat4x4<f32>,
+	projection: mat4x4<f32>,
+	view: mat4x4<f32>,
 	inv_proj: mat4x4<f32>,
 };
 
@@ -26,8 +27,8 @@ struct VertexOutput {
 
 @vertex
 fn vs_main(vin: VertexInput) -> VertexOutput {
-    let pos = camera.proj_view * model * vec4(vin.pos, 1.0);
-    let normal = normalize((model * vec4(vin.normal, 0.0)).xyz);
+    let pos = camera.projection * camera.view * model * vec4(vin.pos, 1.0);
+    let normal = normalize((camera.view * model * vec4(vin.normal, 0.0)).xyz);
 
     return VertexOutput(pos, normal);
 }
