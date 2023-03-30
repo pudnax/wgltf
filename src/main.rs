@@ -3,7 +3,7 @@ use std::time::Instant;
 use color_eyre::Result;
 use glam::vec3;
 use log::warn;
-use poisson_corrode::{
+use wgltf::{
     app::{App, AppState},
     camera::Camera,
     gltf::GltfDocument,
