@@ -1,5 +1,10 @@
-use crate::utils::NonZeroSized;
-use glam::{Mat4, Vec3};
+use std::num::NonZeroU64;
+
+use dolly::{
+    prelude::{Position, Smooth, YawPitch},
+    rig::CameraRig,
+};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -25,6 +30,7 @@ impl Default for CameraUniform {
 pub struct CameraBinding {
     pub buffer: wgpu::Buffer,
     pub binding: wgpu::BindGroup,
+    pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl CameraBinding {
@@ -36,7 +42,7 @@ impl CameraBinding {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
-                min_binding_size: Some(CameraUniform::SIZE),
+                min_binding_size: NonZeroU64::new(std::mem::size_of::<CameraUniform>() as _),
             },
             count: None,
         }],
@@ -48,126 +54,76 @@ impl CameraBinding {
             contents: bytemuck::bytes_of(&CameraUniform::default()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let layout = device.create_bind_group_layout(&Self::DESC);
+        let bind_group_layout = device.create_bind_group_layout(&Self::DESC);
         let binding = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Camera Bind Group"),
-            layout: &layout,
+            layout: &bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffer.as_entire_binding(),
             }],
         });
 
-        Self { buffer, binding }
+        Self {
+            buffer,
+            binding,
+            bind_group_layout,
+        }
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue, camera: &mut Camera) {
-        if camera.updated {
-            queue.write_buffer(
-                &self.buffer,
-                0,
-                bytemuck::bytes_of(&camera.get_proj_view_matrix()),
-            );
-            camera.updated = false;
-        }
+    pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
+        queue.write_buffer(
+            &self.buffer,
+            0,
+            bytemuck::bytes_of(&camera.get_proj_view_matrix()),
+        );
     }
 }
 
-#[derive(Debug, Clone, Copy)]
 pub struct Camera {
-    pub zoom: f32,
-    pub target: Vec3,
-    pub eye: Vec3,
-    pub pitch: f32,
-    pub yaw: f32,
-    pub up: Vec3,
+    pub rig: CameraRig,
+    pub position: Vec3,
+    pub rotation: Quat,
     pub aspect: f32,
-
-    updated: bool,
 }
 
 impl Camera {
-    const ZFAR: f32 = 100.;
-    const ZNEAR: f32 = 0.1;
+    const ZNEAR: f32 = 0.001;
     const FOVY: f32 = std::f32::consts::PI / 2.0;
-    const UP: Vec3 = Vec3::Y;
 
-    pub fn new(zoom: f32, pitch: f32, yaw: f32, target: Vec3, aspect: f32) -> Self {
-        let mut camera = Self {
-            zoom,
-            pitch,
-            yaw,
-            eye: Vec3::ZERO,
-            target,
-            up: Self::UP,
-            aspect,
-
-            updated: false,
-        };
-        camera.fix_eye();
-        camera
+    pub fn new(
+        position: Vec3,
+        yaw: f32,
+        pitch: f32,
+        screen_width: u32,
+        screen_height: u32,
+    ) -> Self {
+        let rig: CameraRig = CameraRig::builder()
+            .with(Position::new(position))
+            .with(YawPitch::new().yaw_degrees(yaw).pitch_degrees(pitch))
+            .with(Smooth::new_position_rotation(1.0, 1.5))
+            .build();
+        Self {
+            rig,
+            aspect: screen_width as f32 / screen_height as f32,
+            position,
+            rotation: Quat::IDENTITY,
+        }
     }
 
     pub fn build_projection_view_matrix(&self) -> (Mat4, Mat4) {
-        let view = Mat4::look_at_rh(self.eye, self.target, self.up);
-        let proj = Mat4::perspective_rh(Self::FOVY, self.aspect, Self::ZNEAR, Self::ZFAR);
+        let tr = self.rig.final_transform;
+        let view = Mat4::look_at_rh(tr.position, tr.position + tr.forward(), tr.up());
+        let proj = Mat4::perspective_infinite_reverse_rh(Self::FOVY, self.aspect, Self::ZNEAR);
         (proj, view)
-    }
-
-    pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom.clamp(0.3, Self::ZFAR / 2.);
-        self.fix_eye();
-        self.updated = true;
-    }
-
-    pub fn add_zoom(&mut self, delta: f32) {
-        self.set_zoom(self.zoom + delta);
-    }
-
-    pub fn set_pitch(&mut self, pitch: f32) {
-        self.pitch = pitch.clamp(
-            -std::f32::consts::PI / 2.0 + f32::EPSILON,
-            std::f32::consts::PI / 2.0 - f32::EPSILON,
-        );
-        self.fix_eye();
-        self.updated = true;
-    }
-
-    pub fn add_pitch(&mut self, delta: f32) {
-        self.set_pitch(self.pitch + delta);
-    }
-
-    pub fn set_yaw(&mut self, yaw: f32) {
-        self.yaw = yaw;
-        self.fix_eye();
-        self.updated = true;
-    }
-
-    pub fn add_yaw(&mut self, delta: f32) {
-        self.set_yaw(self.yaw + delta);
-    }
-
-    fn fix_eye(&mut self) {
-        let pitch_cos = self.pitch.cos();
-        self.eye = self.target
-            - self.zoom
-                * Vec3::new(
-                    self.yaw.sin() * pitch_cos,
-                    self.pitch.sin(),
-                    self.yaw.cos() * pitch_cos,
-                );
-    }
-
-    pub fn set_aspect(&mut self, width: u32, height: u32) {
-        self.aspect = width as f32 / height as f32;
-        self.updated = true;
     }
 
     pub fn get_proj_view_matrix(&self) -> CameraUniform {
         let (projection, view) = self.build_projection_view_matrix();
         let proj_view = projection * view;
+        let pos = Vec4::from((self.rig.final_transform.position, 1.));
         CameraUniform {
-            view_position: [self.eye.x, self.eye.y, self.eye.z, 1.0],
+            view_position: pos.to_array(),
             projection: projection.to_cols_array_2d(),
             view: view.to_cols_array_2d(),
             inv_proj: proj_view.inverse().to_cols_array_2d(),
