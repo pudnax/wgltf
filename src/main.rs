@@ -8,6 +8,7 @@ use wgltf::{
     camera::Camera,
     gltf::GltfDocument,
     input::{KeyMap, KeyboardMap},
+    watcher::Watcher,
 };
 use wgpu::SurfaceError;
 use winit::{
@@ -22,11 +23,20 @@ const MAX_FRAME_TIME: f64 = 15. * FIXED_TIME_STEP; // 0.25;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    env_logger::builder()
+        .filter_module("wgpu_core", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .filter_module("mangohud", log::LevelFilter::Warn)
+        .filter_module("winit", log::LevelFilter::Warn)
+        .filter_module("naga", log::LevelFilter::Error)
+        .init();
 
-    let event_loop = winit::event_loop::EventLoop::new();
+    let event_loop = winit::event_loop::EventLoopBuilder::with_user_event().build();
     let window = winit::window::WindowBuilder::new()
         .with_title("Poisson Corrode")
         .with_inner_size(LogicalSize::new(1280, 1024))
+        .with_resizable(false)
+        .with_decorations(false)
         .build(&event_loop)?;
 
     let PhysicalSize { width, height } = window.inner_size();
@@ -44,7 +54,9 @@ fn main() -> Result<()> {
         .bind(LControl, KeyMap::new("boost", -1.0));
     let mut app_state = AppState::new(camera, Some(keyboard_map));
 
-    let mut app = App::new(&window)?;
+    let watcher = Watcher::new(&event_loop)?;
+
+    let mut app = App::new(&window, watcher)?;
     let info = app.get_info();
     println!("{info}");
 
@@ -123,6 +135,9 @@ fn main() -> Result<()> {
                     },
                 ..
             } => *control_flow = ControlFlow::Exit,
+            Event::UserEvent((path, module)) => {
+                app.handle_events(path, module);
+            }
             Event::LoopDestroyed => {
                 println!("// End from the loop. Bye bye~⏎ ");
             }

@@ -1,8 +1,8 @@
 use std::{
     iter::{self, Repeat},
-    mem::size_of,
     num::NonZeroU64,
     ops::Range,
+    path::Path,
     time::Duration,
 };
 
@@ -11,8 +11,15 @@ use glam::Vec4;
 use wgpu::util::DeviceExt;
 use wgpu_profiler::GpuTimerScopeResult;
 
+use crate::SHADER_COMPILER;
+
 pub trait NonZeroSized: Sized {
-    const NSIZE: NonZeroU64 = unsafe { NonZeroU64::new_unchecked(size_of::<Self>() as _) };
+    const NSIZE: NonZeroU64 = {
+        if std::mem::size_of::<Self>() == 0 {
+            panic!("type is zero-sized");
+        }
+        unsafe { NonZeroU64::new_unchecked(std::mem::size_of::<Self>() as _) }
+    };
 }
 impl<T> NonZeroSized for T where T: Sized {}
 
@@ -90,4 +97,72 @@ pub fn create_solid_color_texture(
         },
         bytemuck::bytes_of(&color),
     )
+}
+
+pub trait DeviceShaderExt {
+    fn create_shader_with_compiler(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> color_eyre::Result<wgpu::ShaderModule>;
+}
+
+impl DeviceShaderExt for wgpu::Device {
+    fn create_shader_with_compiler(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> color_eyre::Result<wgpu::ShaderModule> {
+        let bytes = SHADER_COMPILER.lock().create_shader_module(path.as_ref())?;
+
+        let module = self.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: path.as_ref().to_str(),
+            source: wgpu::ShaderSource::SpirV(bytes.into()),
+        });
+        Ok(module)
+    }
+}
+
+pub trait FormatConversions {
+    fn swap_srgb_suffix(self) -> wgpu::TextureFormat;
+}
+
+impl FormatConversions for wgpu::TextureFormat {
+    fn swap_srgb_suffix(self) -> wgpu::TextureFormat {
+        use wgpu::TextureFormat::*;
+        match self {
+            Rgba8UnormSrgb => Rgba8Unorm,
+            Bgra8UnormSrgb => Bgra8Unorm,
+            Bc1RgbaUnormSrgb => Bc1RgbaUnorm,
+            Bc2RgbaUnormSrgb => Bc2RgbaUnorm,
+            Bc3RgbaUnormSrgb => Bc3RgbaUnorm,
+            Bc7RgbaUnormSrgb => Bc7RgbaUnorm,
+            Etc2Rgb8UnormSrgb => Etc2Rgb8Unorm,
+            Etc2Rgb8A1UnormSrgb => Etc2Rgb8A1Unorm,
+            Etc2Rgba8UnormSrgb => Etc2Rgba8Unorm,
+            Astc {
+                block,
+                channel: wgpu::AstcChannel::UnormSrgb,
+            } => Astc {
+                block,
+                channel: wgpu::AstcChannel::Unorm,
+            },
+
+            Rgba8Unorm => Rgba8UnormSrgb,
+            Bgra8Unorm => Bgra8UnormSrgb,
+            Bc1RgbaUnorm => Bc1RgbaUnormSrgb,
+            Bc2RgbaUnorm => Bc2RgbaUnormSrgb,
+            Bc3RgbaUnorm => Bc3RgbaUnormSrgb,
+            Bc7RgbaUnorm => Bc7RgbaUnormSrgb,
+            Etc2Rgb8Unorm => Etc2Rgb8UnormSrgb,
+            Etc2Rgb8A1Unorm => Etc2Rgb8A1UnormSrgb,
+            Etc2Rgba8Unorm => Etc2Rgba8UnormSrgb,
+            Astc {
+                block,
+                channel: wgpu::AstcChannel::Unorm,
+            } => Astc {
+                block,
+                channel: wgpu::AstcChannel::UnormSrgb,
+            },
+            _ => self,
+        }
+    }
 }
